@@ -9,7 +9,6 @@
 #define RST_PIN         22 
 //slave select pin for MFRC522         
 #define SS_PIN          5
-
 //initialise MFRC522 module at given pins  
 MFRC522 mfrc522(SS_PIN, RST_PIN);  
 
@@ -22,42 +21,51 @@ MFRC522::MIFARE_Key key;
 //Name of the item to be added in inventory
 byte nameByte[18];
 byte countByte[18];
+byte pinByte[18];
+byte defaultPinByte[18];
+byte updatedPINByte[18];
+
+byte empty[18] = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
 
 //byte variable for read/write operation 
 //stores the name of the component 
 byte readbackblock1[18];
 //stores the number of units
 byte readbackblock2[18];
+//stores the password
+byte readbackblock3[18];
 
-int r1 = 6;
-int r2 = 7;
-int r3 = 8;
-int r4 = 9;
-int c1 = 10;
-int c2 = 11;
-int c3 = 14;
+byte readbackblock4[18];
+
+int r1 = 17;
+int r2 = 26;
+int r3 = 21;
+int r4 = 19;
+int c1 = 11;
+int c2 = 16;
+int c3 = 20;
+
+String PIN;
+String action = "0";
+int attempt = 0;
+bool login;
+
 
 void setup(){
-  
   //start the serial port  
   Serial.begin(115200);
 
-  //LCD interfacing    
-  //set up SDA and SCL pins for I2C LCD     
   Wire.setSDA(12);
   Wire.setSCL(13);
   //start I2C port
   Wire.begin();
+  
   //intialise the LCD  
-  lcd.init();
+  lcd.init();  
   //clear the display
   lcd.clear(); 
   //turn on backlight        
   lcd.backlight();
-  
-  //Greeting text
-  lcd.setCursor(0,0);
-  lcd.print("Greetings!");  
   
 //interfacing the MFRC522 module
   //set up SPI pins for MFRC522 interfacing  
@@ -67,6 +75,7 @@ void setup(){
   SPI.setCS(5);
   //start SPI communication  
   SPI.begin();
+  
   pinMode(r1, OUTPUT);
   pinMode(r2, OUTPUT);
   pinMode(r3, OUTPUT);
@@ -74,14 +83,9 @@ void setup(){
   pinMode(c1, INPUT_PULLUP);
   pinMode(c2, INPUT_PULLUP);
   pinMode(c3, INPUT_PULLUP);
+  
   //initialise MFRC522 module
-  mfrc522.PCD_Init();
-  
-  //allow some time for initialisation      
-  delay(2000);
-  
-  lcd.clear();
-                                              
+  mfrc522.PCD_Init();                              
   mfrc522.PCD_DumpVersionToSerial();         
 
   //set key = FF FF FF FF FF FF for read/write operation
@@ -89,41 +93,227 @@ void setup(){
     key.keyByte[i] = 0xFF;  // Prepare the security key for the read and write operations.
   }
   
+  //Greeting text
+  lcd.setCursor(3,0);
+  lcd.print("Greetings!");
+  //allow some time for initialisation      
+  delay(2000);
 }
 
 void loop() {
-
+  login = true;
+  lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print("1:AddI 3:AddC  M");
-  lcd.setCursor(0,1);  
-  lcd.print("2:SubI 4:Read >");
-  
-  String mode = getString(15,1,"",0);
+  lcd.print("1 : Register   M");
+  lcd.setCursor(0,1);
+  lcd.print("2 : Login     >");
+
+  action = getString(15,1,"",0); 
+
+  if(action == "1"){
+    Register();
+  }
     
-  if(mode == "1"){ 
-         
-  increment(); 
-  }
-  else if(mode == "2"){ 
-      
-  decrement(); 
-  }
-  else if(mode == "3"){
+  else if(action == "2"){
+  lcd.clear();
+  lcd.print("Scan Your Card");
   
-  addCard();
-  } 
-  else if(mode == "4"){
-  
-  readCard();    
+    getPIN(&PIN);  
+    while(login){    
+    Login();
+    }    
   }
-
+    
   else{
-    lcd.setCursor(15,1);
-    lcd.print(" ");    
-  }
+        lcd.setCursor(15,1);
+        lcd.print(" ");    
+  }  
+}
+
+void Register(){
+  mfrc522.PCD_Init();  
+  lcd.clear();
+  lcd.print("Scan Your Card");
+  delay(5000);   
+   if ( ! mfrc522.PICC_IsNewCardPresent()) {
+              return;
   }
 
-//function to write data on card
+  if ( ! mfrc522.PICC_ReadCardSerial()) {
+              return;
+  }
+
+  addCard();  
+  
+  lcd.setCursor(0,0);
+  lcd.print("Assinging PIN...");
+  lcd.setCursor(0,1);
+  lcd.print("Please Wait...");
+  int rand = random(10000, 1000000);
+  Serial.println(rand);
+  String defaultPIN = "54321";
+  defaultPIN.getBytes(defaultPinByte,18);
+  writeBlock(4, defaultPinByte);
+  delay(5000);
+
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Card Registered");
+  lcd.setCursor(2,1);
+  lcd.print("Successfully");
+  delay(2000);
+  
+  lcd.clear();  
+  lcd.setCursor(2,0);
+  lcd.print("Default Login");
+  lcd.setCursor(4,1);
+  lcd.print("PIN 54321");
+  delay(5000);  
+return;  
+}
+
+void Login(){
+  
+  String userPin = getUserPIN(0,3,"Enter PIN",1,6);
+  lcd.clear();
+  if(PIN == userPin){  
+    lcd.setCursor(0,0);
+    lcd.print("1:AddI 3:Read  M");
+    lcd.setCursor(0,1);  
+    lcd.print("2:SubI 4:RstP >");
+    
+    String mode = getString(15,1,"",0);
+      
+      if(mode == "1"){    
+      increment(); 
+      }
+      else if(mode == "2"){ 
+      decrement(); 
+      }
+      else if(mode == "4"){
+      resetPIN();
+      } 
+      else if(mode == "3"){
+      readCard();    
+      }
+      else{
+        lcd.setCursor(15,1);
+        lcd.print(" ");    
+      }
+  }
+
+  else{ 
+      tryAgain();
+  }
+}
+
+void resetPIN(){
+  String userPin = getUserPIN(0,2,"Enter Old PIN",1,6);
+  
+  if(userPin == PIN){
+  String updatedPIN = getUserPIN(0,2,"Enter New Pin",1,6);
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Writing...");
+  lcd.setCursor(0,1);  
+  lcd.print("Please Wait...");
+  updatedPIN.getBytes(updatedPINByte,18);
+  writeBlock(4, updatedPINByte);
+  delay(5000);
+
+  lcd.clear();
+  lcd.setCursor(3,0);
+  lcd.print("PIN Updated");
+  lcd.setCursor(2,1);
+  lcd.print("Successfully");
+  delay(2000);
+    
+  lcd.clear();  
+  lcd.setCursor(0,0);
+  String temp = "New PIN Is " + updatedPIN;  
+  lcd.print(temp);
+  delay(2000);
+  login = false;
+  }
+  
+else{
+  attempt = 0;
+  tryAgain();
+}  
+}
+
+String getUserPIN(int textRow, int textCol, String text, int pinRow, int pinCol){
+  lcd.clear();  
+  lcd.setCursor(textCol, textRow);
+  lcd.print(text);
+  String userPIN = getString(pinCol,pinRow,"",4);
+  return userPIN;
+}
+
+void getPIN(String* PIN){
+  mfrc522.PCD_Init();
+  delay(5000); 
+  if ( ! mfrc522.PICC_IsNewCardPresent()) {
+              login = false;
+              return;
+  }
+
+  if ( ! mfrc522.PICC_ReadCardSerial()) {
+              return;
+  }
+
+  readBlock(4, readbackblock3);
+  delay(3000);
+  char pinChar[18];
+  for(int i = 0; i < 17; i++){
+    pinChar[i] = (char)readbackblock3[i];  
+  }
+  *PIN = pinChar;
+}
+
+void tryAgain(){
+  attempt = attempt + 1;    
+      if(attempt < 3){
+      lcd.clear();
+      lcd.setCursor(1,0);
+      lcd.print("Incorrect PIN");
+      delay(2000);   
+    }
+    else{
+      lcd.clear();
+      lcd.setCursor(2,0);
+      lcd.print("3 Incorrect");
+      lcd.setCursor(4,1);
+      lcd.print("Attempts");
+      delay(1000);
+      lcd.clear();
+      lcd.setCursor(2,0);
+      lcd.print("Enter PIN in");
+      lcd.setCursor(6,1);
+      lcd.print("seconds");
+      
+      int seconds = 30;
+        
+        while(seconds > 0){
+          lcd.setCursor(3,1);
+          lcd.print(" ");
+                    
+          if(seconds > 9){
+            lcd.setCursor(3,1);
+            lcd.print(seconds);
+            delay(1000);
+          }
+          else{
+            lcd.setCursor(4,1);
+            lcd.print(seconds);
+            delay(1000);                    
+          }
+        seconds = seconds - 1;
+        }
+      attempt = 0;  
+    }
+}
+
 int writeBlock(int blockNumber, byte arrayAddress[])
 {
   //check if the block number corresponds to data block or triler block, rtuen with error if it's trailer block.
@@ -154,7 +344,6 @@ int writeBlock(int blockNumber, byte arrayAddress[])
   return 0;
 }
 
-//function to read data on card
 int readBlock(int blockNumber, byte arrayAddress[])
 {
   int largestModulo4Number = blockNumber / 4 * 4;
@@ -180,14 +369,15 @@ int readBlock(int blockNumber, byte arrayAddress[])
   return 0;  
 }
 
-//fucntion to increment inventory count
 void increment(){
   mfrc522.PCD_Init();  
   
   lcd.clear();
-  lcd.print("Scan Your Card");
-  delay(5000);  
-  
+  lcd.setCursor(0,0);
+  lcd.print("Reading...");
+  lcd.setCursor(0,1);
+  lcd.print("Please Wait...");
+  delay(1000);  
   if ( ! mfrc522.PICC_IsNewCardPresent()) {
               return;
   }
@@ -195,21 +385,14 @@ void increment(){
   if ( ! mfrc522.PICC_ReadCardSerial()) {
               return;
   }
-  
-  lcd.clear();
+  lcd.clear();  
   lcd.setCursor(0,0);
-  lcd.print("Reading...");
-  lcd.setCursor(0,1);
-  lcd.print("Please Wait...");
-  
-  readBlock(2, readbackblock2);
-  delay(3000);
-  
-  lcd.clear();
-  lcd.setCursor(2,0);
-  lcd.print("Adding item to");
+  lcd.print("Enter Item Count");
+  lcd.setCursor(0, 1);
+  lcd.print(">");
   lcd.setCursor(1,1);
-  lcd.print("the inventory");  
+  
+  String additionalCount = getString(1,1,"",15);
   
   int place = 0;
   for(int i = 0; i < 17; i++){
@@ -226,7 +409,15 @@ void increment(){
     int place_value = readbackblock2[i]-48;
      number = number + place_value*pow(10, place-i-1);     
   }
-  number = number + 1;
+  
+  lcd.clear();
+  lcd.setCursor(1,0);
+  lcd.print("Adding items to");
+  lcd.setCursor(1,1);
+  lcd.print("the inventory");
+  
+  number = number + additionalCount.toInt();
+  
   String count = String(number);
   count += "\n";
   count.getBytes(countByte,18);
@@ -234,7 +425,7 @@ void increment(){
   delay(2000);
   
   lcd.clear();
-  lcd.print("Item added");
+  lcd.print("Items added");
   lcd.setCursor(2,1);
   lcd.print("Successfully");
   
@@ -258,18 +449,17 @@ void increment(){
     lcd.leftToRight();    
   }  
   delay(5000);
-  
   lcd.clear();            
 }
 
-//Function to decrement inventory count
 void decrement(){
   mfrc522.PCD_Init();  
-  
   lcd.clear();
-  lcd.print("Scan Your Card");
-  delay(5000);
-  
+  lcd.setCursor(0,0);
+  lcd.print("Reading...");
+  lcd.setCursor(0,1);
+  lcd.print("Please Wait...");
+  delay(1000);
   if ( ! mfrc522.PICC_IsNewCardPresent()) {
               return;
   }
@@ -277,21 +467,18 @@ void decrement(){
   if ( ! mfrc522.PICC_ReadCardSerial()) {
               return;
   }
-  
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Reading...");
-  lcd.setCursor(0,1);
-  lcd.print("Please Wait...");
-  
+ 
   readBlock(2, readbackblock2);
   delay(3000);
-  
-  lcd.clear();
+
+  lcd.clear(); 
   lcd.setCursor(0,0);
-  lcd.print("Removing item");
+  lcd.print("Enter Item Count");
+  lcd.setCursor(0, 1);
+  lcd.print(">");
   lcd.setCursor(1,1);
-  lcd.print("from inventory");
+  
+  String additionalCount = getString(1,1,"",15);
   
   int place = 0;
   for(int i = 0; i < 17; i++){
@@ -308,7 +495,15 @@ void decrement(){
     int place_value = readbackblock2[i]-48;
      number = number + place_value*pow(10, place-i-1);     
   }
-  number = number - 1;
+
+  number = number - additionalCount.toInt();
+
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Removing Items");
+  lcd.setCursor(1,1);
+  lcd.print("From Inventory");
+  
   String count = String(number);
   count += "\n";
   count.getBytes(countByte,18);
@@ -317,7 +512,7 @@ void decrement(){
   
   lcd.clear();
   lcd.setCursor(2,0);
-  lcd.print("Item removed");
+  lcd.print("Items Removed");
   lcd.setCursor(2,1);
   lcd.print("Successfully");
 
@@ -339,20 +534,19 @@ void decrement(){
   for(int i = 0; i < 17; i++){
     lcd.print((char)readbackblock2[i]);    
     lcd.leftToRight();    
-  }
+  }  
   delay(5000);
-  
   lcd.clear();          
 }
 
-//function to read card
 void readCard(){
   mfrc522.PCD_Init();  
-  
   lcd.clear();
-  lcd.print("Scan Your Card");
-  delay(5000);
-  
+  lcd.setCursor(0,0);
+  lcd.print("Reading...");
+  lcd.setCursor(0,1);
+  lcd.print("Please Wait...");
+  delay(1000);
   if ( ! mfrc522.PICC_IsNewCardPresent()) {
               return;
   }
@@ -360,15 +554,7 @@ void readCard(){
   if ( ! mfrc522.PICC_ReadCardSerial()) {
               return;
   }
-  
-  //User Interface msg: Card Detected...
-  //User Interface msg: Writing...
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Card detected...");
-  lcd.setCursor(0,1);
-  lcd.print("Reading...");
- 
+    
   readBlock(1, readbackblock1);
   delay(3000);  
   readBlock(2, readbackblock2);
@@ -388,18 +574,13 @@ void readCard(){
     lcd.print((char)readbackblock2[i]);    
     lcd.leftToRight();    
   }  
-  delay(7000);
-  
+  delay(5000);
   lcd.clear();
 }
 
-//function to add card
 void addCard(){
   mfrc522.PCD_Init();  
-  
-  lcd.clear();
-  lcd.print("Scan Your Card");
-  delay(5000);
+  delay(1000);
   if ( ! mfrc522.PICC_IsNewCardPresent()) {
               return;
   }
@@ -426,9 +607,10 @@ void addCard(){
   lcd.print(name_text);
   
   name.getBytes(nameByte,18);
+  writeBlock(1, empty);
+  delay(1000);
   writeBlock(1, nameByte);
-  delay(2000);
-  
+  delay(1000);
   lcd.clear(); 
   
   //Prompt the user for the count of item
@@ -451,14 +633,17 @@ void addCard(){
   count.getBytes(countByte,18);
   writeBlock(2, countByte);
   delay(2000);
-  
   lcd.clear();
+
+  lcd.setCursor(0,0);
+  lcd.print("Writing...");
+  lcd.setCursor(0,1);  
+  lcd.print("Please Wait...");
    
   readBlock(1, readbackblock1);
   delay(3000);  
   readBlock(2, readbackblock2);
   delay(3000);
-  
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("Check-In Success");
@@ -476,13 +661,11 @@ void addCard(){
   for(int i = 0; i < 17; i++){
     lcd.print((char)readbackblock2[i]);    
     lcd.leftToRight();    
-  }
-  delay(7000);
-  
+  }  
+  delay(5000);
   lcd.clear();  
 }
 
-//function for keypad interfacing
 String getKey(int cursorRow, int cursorCol){
   while(1){
     String key;
@@ -579,7 +762,6 @@ String getKey(int cursorRow, int cursorCol){
         }
         return key;        
       }
-    
     digitalWrite(r1, HIGH);digitalWrite(r2, LOW);digitalWrite(r3, HIGH);digitalWrite(r4, HIGH);
       if(digitalRead(c1) == LOW){
          
@@ -673,7 +855,6 @@ String getKey(int cursorRow, int cursorCol){
         }
         return key;        
       }
-    
     digitalWrite(r1, HIGH);digitalWrite(r2, HIGH);digitalWrite(r3, LOW);digitalWrite(r4, HIGH);
       if(digitalRead(c1) == LOW){
          
@@ -760,7 +941,6 @@ String getKey(int cursorRow, int cursorCol){
         }
         return key;        
       }
-    
     digitalWrite(r1, HIGH);digitalWrite(r2, HIGH);digitalWrite(r3, HIGH);digitalWrite(r4, LOW);
       if(digitalRead(c1) == LOW){delay(400);return("*");}
       else if(digitalRead(c2) == LOW){
@@ -790,11 +970,9 @@ String getKey(int cursorRow, int cursorCol){
   }
 }
 
-//function for keypad interfacing
 String getString(int startCursorCol, int startCursorRow, String text, int stringMaxLength){
     
   int cursorRow  = startCursorRow; int cursorCol = startCursorCol;
-  // lcd.clear();
   lcd.setCursor(cursorCol, cursorRow);
   String key = "0";
   int count= 0;
